@@ -6,7 +6,7 @@
 @IDE    ：PyCharm
 @Author ：Mr. toiler
 @Date   ：1/18/2020 11:18 AM
-@Desc   ：
+@Desc   ：利用 pywin32 把office文档转为PDF， 这个速度比较慢，但是效果好
 =================================================="""
 import os, time
 from win32com.client import Dispatch, constants, gencache, DispatchEx
