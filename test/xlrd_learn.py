@@ -7,13 +7,6 @@ from reportlab.lib.units import inch, mm
 from reportlab.pdfgen import canvas
 
 
-
-
-A4_size = [297 * mm, 210 * mm]
-top_margin = 50
-left_margin = 50
-
-
 class Pos(object):
     def __init__(self, x, y):
         self.x = x
@@ -50,31 +43,61 @@ for i in range(0, rb.nsheets):
 
 rs = rb.sheets()[0]
 
-ncols = min(len(rs.colinfo_map), rs.ncols)
-nrows = min(len(rs.rowinfo_map), rs.nrows)
-
 ncols = rs.ncols
 nrows = rs.nrows
 
-col_widths = [rs.colinfo_map.get(colx).width/2.54 for colx in range(0, ncols)]
-row_heights = [rs.rowinfo_map.get(rowx).height for rowx in range(0, nrows)]
+# ncols 有空行，导致生成的文件不对称
+has_emplty_col = True
+while has_emplty_col:
+    ncols = ncols - 1
+    for rowx in range(0, nrows):
+        if rs.cell(rowx, ncols).value:
+            has_emplty_col = False
+            break
 
-need_size = Size(w=sum(col_widths),
-                 h=sum(row_heights))
+
+ncols = ncols + 1
 
 
-merged_cells = dict()
+col_widths = list([rs.colinfo_map.get(colx).width/2.54 for colx in range(0, ncols)])
+row_heights = list([rs.rowinfo_map.get(rowx).height for rowx in range(0, nrows)])
+
+zoom = max(sum(col_widths), sum(row_heights)) / a4_size.h
+col_widths = list([width/zoom for width in col_widths])
+row_heights = list([height/zoom for height in row_heights])
+
+need_size = Size(w=sum(col_widths) * 1.1,
+                 h=sum(row_heights) * 1.1)
+
+print(need_size)
+
+start_pos = Pos(x=need_size.w * 0.05, y=need_size.h * 0.05)
+
+c = canvas.Canvas("c:/Users/zbd/PycharmProjects/mylearn/res/hello.pdf", pagesize=(need_size.w, need_size.h))
+
+merged_cells = dict()  # 保存合并单元格的尺寸，便于把内容输出到合适的位置
+leave_lines = dict()  # 合并单元格，内部的线就不需要了，需要删除
 for row1, row2, col1, col2 in rs.merged_cells:
     key = '{}_{}'.format(row1, col1)
     size = Size(w=sum(col_widths[col1:col2]), h=sum(row_heights[row1:row2]))
-    merged_cells[key] = [size, (row1,row2, col1, col2)]
+    for rowx in range(row1, row2):
+        for colx in range(col1, col2):
+            bl, bt, br, bb = 0, 1, 2, 3
+            border = list([False, False, False, False])
+            if rowx == row1:
+                border[bt] = True
+            if rowx == (row2 - 1):
+                border[bb] = True
+            if colx == col1:
+                border[bl] = True
+            if colx == (col2 - 1):
+                border[br] = True
+            leave_lines['{}_{}'.format(rowx, colx)] = border
+
+    merged_cells[key] = [size, (row1, row2, col1, col2)]
 
 
 
-
-# excel一页搞到PDF一页上
-print("A4 {} need {}".format(a4_size, need_size))
-c = canvas.Canvas("c:/Users/zbd/PycharmProjects/mylearn/res/hello.pdf", pagesize=(need_size.w + 200, need_size.h + 100))
 from reportlab.lib.colors import yellow, red, black,white, HexColor
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
@@ -95,28 +118,25 @@ pdfmetrics.registerFont(kt)
 pdfmetrics.registerFont(hwst)
 pdfmetrics.registerFont(fs)
 
-
-start_pos = Pos(x=150, y=50)
 line_list = list()
 pos = Pos(start_pos.x, start_pos.y)
-print(need_size)
 for rowx in range(nrows-1, -1, -1):
     for colx in range(0, ncols):
         cell_size = Size(w=col_widths[colx], h=row_heights[rowx])
         cell = rs.cell(rowx, colx)
-        xf = rs.book.xf_list[cell.xf_index]
+        xf:XF = rs.book.xf_list[cell.xf_index]
         b = xf.border
         bl, bt, br, bb = b.left_line_style, b.top_line_style, b.right_line_style, b.bottom_line_style
-        if bl:
+        d = leave_lines.get('{}_{}'.format(rowx, colx), [True, True, True, True])
+        if d[0] and (bl != 0):   # 实际上是线性， 不同的线，比如虚线
             line_list.append((pos.x, pos.y, pos.x, pos.y+cell_size.h))
-        if bt:
+        if d[1] and (bt != 0):
             line_list.append((pos.x, pos.y + cell_size.h, pos.x + cell_size.w, pos.y + cell_size.h))
-        if br:
+        if d[2] and (br != 0):
             line_list.append((pos.x + cell_size.w, pos.y, pos.x + cell_size.w, pos.y + cell_size.h))
-        if bb:
+        if d[3] and (bb != 0):
             line_list.append((pos.x, pos.y, pos.x + cell_size.w, pos.y))
-        if rowx == 0:
-            pass
+
         if cell.value:
             m = merged_cells.get('{}_{}'.format(rowx, colx))
             if m:
@@ -125,16 +145,16 @@ for rowx in range(nrows-1, -1, -1):
                 w, h = cell_size.w, cell_size.h
 
             font = rs.book.font_list[rs.book.xf_list[cell.xf_index].font_index]
-
+            font_height = int(font.height / zoom)
             if font.name in pdfmetrics.getRegisteredFontNames():
                 # print("value:{} font name:{} height:{}".format("{}".format(cell.value), font.name, font.height))
-                c.setFont(font.name, font.height)
+                c.setFont(font.name, font_height)
             else:
-                c.setFont("彩虹粗仿宋", font.height)
-                print("value:{} font name:{} 彩虹粗仿宋 height:{}".format("{}".format(cell.value), font.name, font.height))
+                c.setFont("彩虹粗仿宋", font_height)
+                print("value:{} font name:{} 彩虹粗仿宋 height:{}".format("{}".format(cell.value), font.name, font_height))
                 font.name = "彩虹粗仿宋"
 
-            h1 = font.height  # 当为一行时候， 当 自动换行且宽度不够时候以及有多行时
+            h1 = font_height  # 当为一行时候， 当 自动换行且宽度不够时候以及有多行时
             if cell.ctype == 1:  # string
                 v = "{}".format(cell.value)
                 tmps = v.split("\n")
@@ -142,17 +162,31 @@ for rowx in range(nrows-1, -1, -1):
                     h1 = len(tmps) * (1 + 0.2) * h1  # 0.2倍行距
             elif cell.ctype == 2:  # float
                 if cell.value % 1 == 0.0:
-                    tmps = ['{}'.format(int(cell.value))]
+                    tmps = list(['{}'.format(int(cell.value))])
                 else:
-                    tmps = ['{}'.format(cell.value)]
-                pass
+                    tmps = list(['{}'.format(cell.value)])
+            elif cell.ctype == 3:   # date
+                d = xlrd.xldate_as_datetime(cell.value, 0)
+                try:
+                    format_str = rs.book.format_map.get(xf.format_key).format_str
+                    print(format_str)
+                except:
+                    pass
+                if format_str is None:
+                    format_str = '[$-F800]'   #  默认为yyyy年mm月dd日
+                if format_str.find('[$-F800') != -1:
+                    d = d.strftime('%Y{}%m{}%d{}').format('年', '月', '日')
+                elif format_str.find('[$-F400]') != -1:  # 显示 hh:mm:ss
+                    d = d.strftime('%H:%M:%S')
+                else:
+                    d = d.strftime('%x')
+                print("format:{} value:{} to {}".format(format_str, cell.value, d))
+                tmps = ["{}".format(d)]
             else:
                 tmps = ["{}".format(cell.value)]
 
             xfa: XFAlignment = xf.alignment
             print("row:{} col:{} ctype:{} value:{} hor_align:{} vert_align:{}".format(rowx, colx, cell.ctype,"{}".format(cell.value), xfa.hor_align, xfa.vert_align))
-
-
 
             if xfa.vert_align == 0:  # v_top
                 off_h = 0
@@ -162,50 +196,23 @@ for rowx in range(nrows-1, -1, -1):
                 off_h = h - h1
 
             for i in range(0, len(tmps)):
-                w1 = pdfmetrics.stringWidth(tmps[i], font.name, font.height)
+                w1 = pdfmetrics.stringWidth(tmps[i], font.name, font_height)
                 if xfa.hor_align == 1:  # left
                     off_w = 0
                 elif xfa.hor_align == 2:  # center
                     off_w = (w - w1) / 2
                 else:  # rigth
                     off_w = w - w1
-                c.drawString(pos.x + off_w + 10, pos.y + cell_size.h - off_h - font.height - i * (1 + 0.2) * font.height, tmps[i])
+                if off_w < 0:  off_w = 0   # 不能放下就最靠左
+                c.drawString(pos.x + off_w,
+                             pos.y + cell_size.h - off_h - font_height - i * (1 + 0.2) * font_height, tmps[i])
 
         pos.x = pos.x + cell_size.w
     pos.x = start_pos.x
     pos.y = pos.y + cell_size.h
-c.setLineWidth(4)
+c.setLineWidth(1)
 c.lines(line_list)
 print(line_list)
 
-# c.setFont("彩虹粗仿宋", 40)
-# c.drawString(inch, 8 * inch, "(1,8) 彩虹粗仿宋")
-# c.setStrokeColor(black)
-# c.setLineWidth(10)
-# c.rect(10, 10, need_size.w - 20, need_size.h - 20)
-# c.setStrokeColor(red)
-# c.setLineWidth(10)
-# c.rect(100,100, 300,300)
-
-
 c.showPage()
 c.save()
-
-
-
-# cell.ctype = ctype
-# cell.value = value
-# cell.xf_index = xf_index
-
-# rs.books.xf_list[cell.]
-pass
-
-
-
-# cell = rs.cell(1, 0)
-# cell1 = rs.cell(3, 0)
-# i = 0
-# for font in rs.book.font_list:
-#     print('{} : {} {}'.format(i, rs.book.font_list[i].name, rs.book.font_list[i].height))
-#     i = i + 1
-# print(rs.rich_text_runlist_map)

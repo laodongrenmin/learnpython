@@ -26,7 +26,7 @@ if __name__ == "__main__":
     start_time = time.time()
     # 开始时间
     path = os.path.dirname(__file__).strip('src')
-    pdfPath = path + r'res/excel.xlsx.pdf'
+    pdfPath = path + r'res/hello.pdf'
     imagePath = path + 'res'
     pdf_convert2png(pdfPath, imagePath)
 

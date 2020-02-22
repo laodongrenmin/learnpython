@@ -21,6 +21,7 @@ class Excel2PDF(object):
         import xlrd
         rb = xlrd.open_workbook(self.excel_file_path, formatting_info=True)
         rs = rb.sheet_by_index(0)
+
         cell = rs.cell(1, 0)
         cell1 =  rs.cell(3, 0)
         i = 0
