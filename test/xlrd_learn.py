@@ -41,7 +41,7 @@ for i in range(0, rb.nsheets):
     rs = rb.sheet_by_index(i)
     print("sheet: '{}'  列数: {} 行数: {}".format(rs.name,  rs.ncols, rs.nrows))
 
-rs = rb.sheets()[0]
+rs = rb.sheets()[1]
 
 ncols = rs.ncols
 nrows = rs.nrows
@@ -110,6 +110,7 @@ kt = TTFont('楷体', 'simkai.ttf')
 hwst = TTFont('华文宋体', 'STSONG.TTF')
 
 fs = TTFont('仿宋', 'simfang.ttf')
+ht = TTFont('黑体', 'simhei.ttf')
 
 pdfmetrics.registerFont(chcfs)
 pdfmetrics.registerFont(hwhp)
@@ -117,6 +118,7 @@ pdfmetrics.registerFont(st)
 pdfmetrics.registerFont(kt)
 pdfmetrics.registerFont(hwst)
 pdfmetrics.registerFont(fs)
+pdfmetrics.registerFont(ht)
 
 line_list = list()
 pos = Pos(start_pos.x, start_pos.y)
@@ -195,17 +197,50 @@ for rowx in range(nrows-1, -1, -1):
             else:   # v_bottom
                 off_h = h - h1
 
-            for i in range(0, len(tmps)):
-                w1 = pdfmetrics.stringWidth(tmps[i], font.name, font_height)
+            rich_text_list = rs.rich_text_runlist_map.get((rowx, colx))
+            if rich_text_list and len(tmps) == 1:  # 某个单元格里面有自定义的格式, 且只有一行，其余的就当单元个的格式
+                v = tmps[0]
+                rich_text_list = list(rich_text_list)
+                rich_text_list.append((len(v), font.font_index))
+                w1 = 0
+                s = 0
+                for pi, fi in rich_text_list:
+                    w1 = w1 + pdfmetrics.stringWidth(v[s:pi], font.name, font_height)
+                    s = pi
+                    print(pi, rs.book.font_list[fi].name)
+                    font = rs.book.font_list[fi]
+                    font_height = font.height / zoom
                 if xfa.hor_align == 1:  # left
                     off_w = 0
                 elif xfa.hor_align == 2:  # center
                     off_w = (w - w1) / 2
                 else:  # rigth
                     off_w = w - w1
-                if off_w < 0:  off_w = 0   # 不能放下就最靠左
-                c.drawString(pos.x + off_w,
-                             pos.y + cell_size.h - off_h - font_height - i * (1 + 0.2) * font_height, tmps[i])
+                if off_w < 0:  off_w = 0  # 不能放下就最靠左
+                s = 0
+                for pi, fi in rich_text_list:
+                    w1 = pdfmetrics.stringWidth(v[s:pi], font.name, font_height)
+                    c.drawString(pos.x + off_w,
+                                 pos.y + cell_size.h - off_h - font_height, v[s:pi])
+                    s = pi
+                    font = rs.book.font_list[fi]
+                    font_height = font.height / zoom
+                    off_w = off_w + w1
+                    c.setFont(font.name, font_height)
+                pass
+
+            else:
+                for i in range(0, len(tmps)):
+                    w1 = pdfmetrics.stringWidth(tmps[i], font.name, font_height)
+                    if xfa.hor_align == 1:  # left
+                        off_w = 0
+                    elif xfa.hor_align == 2:  # center
+                        off_w = (w - w1) / 2
+                    else:  # rigth
+                        off_w = w - w1
+                    if off_w < 0:  off_w = 0   # 不能放下就最靠左
+                    c.drawString(pos.x + off_w,
+                                 pos.y + cell_size.h - off_h - font_height - i * (1 + 0.2) * font_height, tmps[i])
 
         pos.x = pos.x + cell_size.w
     pos.x = start_pos.x
