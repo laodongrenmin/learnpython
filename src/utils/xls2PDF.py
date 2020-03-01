@@ -17,7 +17,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
 
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.colors import black, Color
+from reportlab.lib.colors import black, red, Color, HexColor
 from reportlab.lib.styles import ParagraphStyle
 
 from reportlab.lib.units import inch, mm
@@ -27,6 +27,16 @@ from reportlab.platypus import Paragraph, Frame
 
 import os
 import re
+
+
+def is_numeric(str_v):
+    """是否是一个合法的数字， 包括符号 +1.3 、-1.4、1、0.9 但是 .9 这种不是合法的"""
+    try:
+        if isinstance(str_v, (int, float)) or str_v and len(re.findall(r'^[+-]?\d+$|^[+-]?\d+\.\d+$', str_v)) > 0:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 class PDFCNFontMng(object):
@@ -68,8 +78,8 @@ class PDFCNFontMng(object):
                 print(e)
         else:
             ret_font_name = self.default_font_name
-        if font_name != ret_font_name:
-            print('{} instead of {}'.format(font_name, ret_font_name))
+        # if font_name != ret_font_name:
+        #     print('{} instead of {}'.format(font_name, ret_font_name))
         return ret_font_name
 
 
@@ -86,16 +96,23 @@ class DrawText(object):
         self.align: XFAlignment = s[0]
         self.wrapped = self.align.text_wrapped
         self.max_height = s[1]
+        self.text = list(s[2])
+        self.vert_align = self.align.vert_align
+
         # report lab pdf left 0 center 1 right 2 adjust 4
         # exl left 1  center 2 right 3 unknow 0
         self.hor_align = s[0].hor_align - 1
-        if self.hor_align < 0 or self.hor_align > 2: self.hor_align = 4
-        self.vert_align = s[0].vert_align
-        self.text = list(s[2])
+        if self.hor_align not in (0, 1, 2):
+            self.hor_align = 4          # adjust
+            if len(self.text) == 1:  # one line and is numeric then right
+                str_v, font_info = self.text[0]
+                if is_numeric(str_v):
+                    self.hor_align = 2
 
-    def set_font(self, c, font_name, height):
+    @staticmethod
+    def set_font(c, font_name, height):
         """ 设置一种可用的中文字体，不存在就试图加载一种存在的并返回 """
-        return self.fontMng.setFont(c, font_name, height)
+        return DrawText._fontMng.setFont(c, font_name, height)
 
     def draw(self, c: Canvas, pagesize=None):
         story = []
@@ -110,41 +127,41 @@ class DrawText(object):
             font_name = self.set_font(c, font_name, height)
             v = re.sub(r'\n', '<br/>', v)
             v = re.sub(r'\s', '&nbsp;', v)
-            hex_color = hex((color.red << 16) + (color.green << 8) + color.blue).upper()
-            str_line = str_line + DrawText.S_FTR.format(font_name, height, hex_color[2:], v)
+            hex_color = '{0:=06x}'.format((color.red << 16) + (color.green << 8) + color.blue).upper()
+            str_line = str_line + DrawText.S_FTR.format(font_name, height, hex_color, v)
 
         style = ParagraphStyle(name='font', fontName=font_name, fontSize=max_height,
                                leading=max_height * 1.2, alignment=self.hor_align)
-        print('-'*80)
-        print(str_line)
         p = Paragraph(str_line, style)
         w, h = p.wrap(self.w, self.h)
         m_w = p.minWidth()
         if self.wrapped == 0 and m_w > self.w:  # 不自动换行
             need_w = m_w * 1.02
+            self.hor_align = 1   # 已经放不下了，就强制剧中
             w, h = need_w, max_height*1.2
         story.append(p)
         need_h = need_h + h
-        str_line = ''
-            # print('w,h:{},{} m_w:{} need_w h:{},{} v:{} '.format(w, self.h, m_w, need_w, need_h, v))
 
-        # # 垂直对齐
-        # align: XFAlignment
+        # 垂直对齐
+        offset_h = 0
         if self.vert_align == 1:  # v_center
-            self.y = self.y - (self.h - need_h) / 2
+            offset_h = (self.h - need_h) / 2
         elif self.vert_align == 2:  # v_bottom
-            self.y = self.y - (self.h - need_h)
+            offset_h = self.h - need_h
         else:  # v_top
             pass
+        # 水平对齐
+        offset_w = 0
+        if self.hor_align == 1:         # center
+            offset_w = (self.w - need_w)/2
+        elif self.hor_align == 2:       # right
+            offset_w = (self.w - need_w) - height * 0.2
+        elif self.hor_align == 0:       # left
+            offset_w = height * 0.2
+        else:                           # 4 auto
+            offset_w = height * 0.2
 
-        if self.hor_align == 1: # center
-            self.x = self.x - (need_w - self.w)/2
-        elif self.hor_align == 2: # right
-            self.x = self.x - (need_w - self.w) - height * 0.2
-        else:
-            self.x = self.x + height * 0.2
-
-        f = Frame(self.x, self.y, need_w, self.h, 0, 0, 0, 0, showBoundary=0)
+        f = Frame(self.x + offset_w, self.y - offset_h, need_w, self.h, 0, 0, 0, 0, showBoundary=0)
         f.addFromList(story, c)
 
 
@@ -156,23 +173,32 @@ class Xls2PDF(PDFCNFontMng):
         self.rb = xlrd.open_workbook(filename, formatting_info=True)
 
     def convert(self, pdf_path=None):
-        for rs in self.rb.sheets()[2:3]:
+        for rs in self.rb.sheets()[0:1]:
             filename = self.get_pdf_filename(rs.name, pdf_path)
-            pdf_size, col_widths, row_heights, zoom, start_pos = self.get_size(rs=rs, pagesize=(420*mm,297*mm))
+            pdf_size, col_widths, row_heights, zoom, start_pos = self.get_size(rs=rs, pagesize=(420*mm, 297*mm))
+
             c = Canvas(filename, pagesize=pdf_size)
+
             line_list, bg_rect_list, cell_rect_map = self.get_lines(rs, col_widths, row_heights, start_pos)
             # draw background
             for color, pos, size in bg_rect_list:
+                # 修复缺陷，有的颜色，底色显示不了， setFillColor(Color) 这个函数，有的颜色显示不了，改为setFillColorRGB
                 c.setFillColor(color)
                 c.rect(pos[0], pos[1], size[0], size[1], 0, 1)
+
             # draw border
             c.setLineWidth(0.2)
             c.setFillColor(black)
             c.lines(line_list)
+
             # draw text
-            self.fill_string(c, zoom, rs, cell_rect_map)
+            text_info = self.get_draw_text_info(zoom, rs, cell_rect_map)
+            for text, rect in text_info:
+                dt = DrawText(text, rect)
+                dt.draw(c, None)
 
             c.showPage()
+
             c.save()
 
     @staticmethod
@@ -183,10 +209,11 @@ class Xls2PDF(PDFCNFontMng):
         c_rgb = book.colour_map.get(font.colour_index)
         color = Color(0, 0, 0)
         if c_rgb:
-            color = Color(c_rgb[0], c_rgb[1], c_rgb[2])
+            color = Color(c_rgb[0]/255, c_rgb[1]/255, c_rgb[2]/255)
         return font.name, font.height, color
 
-    def fill_string(self, c: Canvas, zoom, rs: Sheet, cell_rect_map):
+    def get_draw_text_info(self, zoom, rs: Sheet, cell_rect_map):
+        text_info = list()
         for n_row in range(0, rs.nrows):
             for n_col in range(0, rs.ncols):
                 cell: Cell = rs.cell(n_row, n_col)
@@ -216,15 +243,12 @@ class Xls2PDF(PDFCNFontMng):
                                 font_name, font_height, font_color = self.get_cell_font(rs.book, font_index=fi)
                                 max_height = max(max_height, font_height / zoom)
                                 si = pi
-                            print(p_s)
-
                         else:
                             p_s.append((v, (font_name, font_height/zoom, font_color)))
-                            print(p_s)
 
                         draw_text_list = [xf.alignment, max_height, p_s]
-                    dt = DrawText(draw_text_list, cell_rect_map.get((n_row, n_col)))
-                    dt.draw(c, None)
+                    text_info.append((draw_text_list, cell_rect_map.get((n_row, n_col))))
+        return text_info
 
     @staticmethod
     def format_date(ft_str, d):
@@ -276,7 +300,7 @@ class Xls2PDF(PDFCNFontMng):
                 if bg.fill_pattern == 1:
                     rgb = rs.book.colour_map.get(bg.pattern_colour_index)
                     if rgb:
-                        bg_rect.append((Color(rgb[0], rgb[1], rgb[2]), (pos[0], pos[1]), cell_size))
+                        bg_rect.append((Color(rgb[0]/255, rgb[1]/255, rgb[2]/255), (pos[0], pos[1]), cell_size))
                 # 把实际单元格的大小也一并返回去，合并和非合并的单元格都返回去
                 if key in merged_cell_size.keys():
                     s = merged_cell_size[key]
@@ -333,11 +357,7 @@ class Xls2PDF(PDFCNFontMng):
     def get_size(rs: Sheet, pagesize=A4, margin=0.04):
         """
         得到在某种纸张下，需要的合适的大小以及缩放比例, 固定转换适合纸张大小，如果行数过多，只取纸张高能够放下的内容
-        :param self:
-        :param rs:
-        :param pagesize:
-        :param margin:
-        :return: （pagesize_w, pagesize_h）,(ws, hs), zoom, start_pos  PDF’w&h、SHEET’各个列宽和行高、缩放比例、开始坐标
+        返回：（pagesize_w, pagesize_h）,(ws, hs), zoom, start_pos  PDF’w&h、SHEET’各个列宽和行高、缩放比例、开始坐标
         """
         n_cols = rs.ncols
         n_rows = rs.nrows
@@ -352,11 +372,11 @@ class Xls2PDF(PDFCNFontMng):
                     break
         n_cols = n_cols + 1
 
-        def get_col_width(n_col, standard_width = 2304):
+        def get_col_width(n_col, standard_width=2304):
             col_info = rs.colinfo_map.get(n_col)
             return standard_width if col_info is None else col_info.width
 
-        def get_row_height(n_row, default_heigth = 288):
+        def get_row_height(n_row, default_heigth=288):
             row_info = rs.rowinfo_map.get(n_row)
             return default_heigth if row_info is None else row_info.height
 
@@ -366,9 +386,25 @@ class Xls2PDF(PDFCNFontMng):
         p_size = (pagesize[0] * (1-margin), pagesize[1] * (1-margin))  # 准备页边距留 4%， 1000 留 40点
         zoom1 = max(sum(col_widths), sum(row_heights)) / max(p_size)
         zoom2 = min(sum(col_widths), sum(row_heights)) / min(p_size)
+
         zoom = max(zoom1, zoom2)
         if zoom < 1:
             zoom = 1
+        # zoom = 16.2
+# ----------------
+        t = time.time()
+        min_font_height = 0xFFFF00
+        font_list = rs.book.font_list
+        xf_list = rs.book.xf_list
+        for n_row in range(0, n_rows):
+            for n_col in range(0, n_cols):
+                cell = rs.cell(n_row, n_col)
+                if cell.value:
+                    font: Font = font_list[xf_list[cell.xf_index].font_index]
+                    min_font_height = min_font_height if font.height < 10 else min(font.height, min_font_height)
+
+        print("font.height:{} font_height:{} zoom:{} cost:{}".format(font.height, min_font_height, zoom, time.time() - t))
+# ----------------------
         col_widths = [c_w/zoom for c_w in col_widths]
         row_heights = [r_h/zoom for r_h in row_heights]
 
@@ -387,7 +423,9 @@ class Xls2PDF(PDFCNFontMng):
 if __name__ == '__main__':
     import time
     t = time.time()
-    excel_file_path = r'c:/Users/zbd/PycharmProjects/mylearn/res/orther.xls'
+    # excel_file_path = r'c:/Users/zbd/PycharmProjects/mylearn/res/excel.xls'
+    excel_file_path = r'c:/Users/zbd/PycharmProjects/mylearn/res/整理.xls'
+
     xls2pdf = Xls2PDF(excel_file_path, True)
     xls2pdf.convert()
     print('time cost: {}'.format(time.time() - t))
