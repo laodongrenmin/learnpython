@@ -51,7 +51,7 @@ class MyTestCase(unittest.TestCase):
         title_print('测试3500常用字以及自定义认识字之外的注音 生成文本文件')
         filename = get_absolute_path("文本.txt")
         outfile = os.path.join(self.out_path, '文本_py.txt')
-        with open(get_absolute_path("三国演义"), 'rb') as f:
+        with open(get_absolute_path("三国演义认识的字"), 'rb') as f:
             buf = f.read()
         encoding = guess_encoding(buf)
         knows_char = buf.decode(encoding)
@@ -60,14 +60,14 @@ class MyTestCase(unittest.TestCase):
         self.assertEqual(len(new), 106)
 
     def test_00005_get_pinyin_file(self):
-        title_print('测试3500常用字以及自定义认识字之外的注音 生成PDF')
+        title_print('测试1500常用字以及自定义认识字之外的注音 生成PDF')
         filename = get_absolute_path("文本.txt")
         outfile = os.path.join(self.out_path, '三国演义_部分章节.pdf')
-        with open(get_absolute_path("三国演义"), 'rb') as f:
+        with open(get_absolute_path("三国演义认识的字"), 'rb') as f:
             buf = f.read()
         encoding = guess_encoding(buf)
         knows_char = buf.decode(encoding)
-        new = get_pinyin_file(filename, outfile, used_char=3500, knows_char=knows_char)
+        new = get_pinyin_file(filename, outfile, used_char=1500, knows_char=knows_char)
         print(''.join(new))
         # self.assertEqual(len(new), 105)
 
